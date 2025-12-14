@@ -61,4 +61,5 @@ export interface InvoiceData {
   syncStatus?: 'synced' | 'pending' | 'error' | 'unsaved'; // 'unsaved' = new draft
   tempId?: string; // Stores the local ID (e.g. 'OFF-1718...') if currently pending sync
   lastSyncError?: string;
+  createdBy?: string;
 }

@@ -1,6 +1,8 @@
 
 import { InvoiceData } from '../types';
 
+import { DEFAULT_SCRIPT_URL } from '../constants/config';
+
 const SCRIPT_URL_KEY = 'prime_sync_script_url';
 
 export interface SyncResult {
@@ -11,7 +13,7 @@ export interface SyncResult {
 }
 
 export const SyncService = {
-    getScriptUrl: () => localStorage.getItem(SCRIPT_URL_KEY),
+    getScriptUrl: () => localStorage.getItem(SCRIPT_URL_KEY) || DEFAULT_SCRIPT_URL,
 
     setScriptUrl: (url: string) => localStorage.setItem(SCRIPT_URL_KEY, url),
 

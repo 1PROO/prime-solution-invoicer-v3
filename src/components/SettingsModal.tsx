@@ -1,14 +1,16 @@
 
 import React, { useState, useEffect } from 'react';
-import { X, Check, AlertTriangle, Link } from 'lucide-react';
+import { X, Check, AlertTriangle, Link, RotateCcw, Lock } from 'lucide-react';
 import { SyncService } from '../services/SyncService';
+import { DEFAULT_SCRIPT_URL } from '../constants/config';
 
 interface Props {
     isOpen: boolean;
     onClose: () => void;
+    isAdmin: boolean;
 }
 
-export const SettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
+export const SettingsModal: React.FC<Props> = ({ isOpen, onClose, isAdmin }) => {
     const [scriptUrl, setScriptUrl] = useState('');
     const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
 
@@ -32,6 +34,12 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
         }
     };
 
+    const handleReset = () => {
+        if (confirm('Reset to default official URL?')) {
+            setScriptUrl(DEFAULT_SCRIPT_URL);
+        }
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -46,48 +54,57 @@ export const SettingsModal: React.FC<Props> = ({ isOpen, onClose }) => {
                         <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
                     </div>
 
-                    <div className="space-y-6">
-                        <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
-                            <h4 className="font-bold text-blue-900 mb-2">How to Connect Google Sheets?</h4>
-                            <ol className="list-decimal list-inside text-sm text-blue-800 space-y-2">
-                                <li>Create a new Google Sheet.</li>
-                                <li>Go to <b>Extensions &gt; Apps Script</b>.</li>
-                                <li>Copy the code from <code>src/server/Code.js</code> in the project folder (or ask developer).</li>
-                                <li>Paste it into the script editor.</li>
-                                <li>Click <b>Deploy &gt; New Deployment</b>.</li>
-                                <li>Select type <b>Web App</b>.</li>
-                                <li>Set "Who has access" to <b>Anyone</b> (Important!).</li>
-                                <li>Click Deploy and copy the <b>Web App URL</b> below.</li>
-                            </ol>
+                    {!isAdmin ? (
+                        <div className="p-8 text-center bg-gray-50 rounded-lg border border-gray-100">
+                            <Lock className="mx-auto text-gray-400 mb-2" size={40} />
+                            <h4 className="font-bold text-gray-700">Access Restricted</h4>
+                            <p className="text-sm text-gray-500 mt-1">Only Administrators can change API configuration.</p>
                         </div>
+                    ) : (
+                        <div className="space-y-6">
+                            <div className="bg-blue-50 border border-blue-100 p-4 rounded-lg">
+                                <h4 className="font-bold text-blue-900 mb-2">API Configuration (Admin)</h4>
+                                <p className="text-sm text-blue-800">
+                                    This URL connects the app to the Google Sheets backend.
+                                    Do not change this unless you are deploying a new backend script.
+                                </p>
+                            </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Google App Script Web App URL</label>
-                            <input
-                                type="text"
-                                value={scriptUrl}
-                                onChange={(e) => setScriptUrl(e.target.value)}
-                                placeholder="https://script.google.com/macros/s/..."
-                                className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none transition"
-                            />
+                            <div>
+                                <div className="flex justify-between items-center mb-1">
+                                    <label className="block text-sm font-medium text-gray-700">Google App Script Web App URL</label>
+                                    <button onClick={handleReset} className="text-xs text-brand-600 hover:underline flex items-center gap-1">
+                                        <RotateCcw size={12} /> Reset to Default
+                                    </button>
+                                </div>
+
+                                <input
+                                    type="text"
+                                    value={scriptUrl}
+                                    onChange={(e) => setScriptUrl(e.target.value)}
+                                    placeholder="https://script.google.com/macros/s/..."
+                                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none transition font-mono text-sm"
+                                />
+                            </div>
+
+                            <div className="flex justify-end items-center gap-4">
+                                {testStatus === 'testing' && <span className="text-gray-500 text-sm flex items-center gap-2"><div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div> Testing...</span>}
+                                {testStatus === 'success' && <span className="text-green-600 text-sm font-bold flex items-center gap-1"><Check size={16} /> Connected!</span>}
+                                {testStatus === 'error' && <span className="text-red-600 text-sm font-bold flex items-center gap-1"><AlertTriangle size={16} /> Connection Failed</span>}
+
+                                <button
+                                    onClick={handleSave}
+                                    disabled={testStatus === 'testing'}
+                                    className="bg-brand-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-brand-700 transition disabled:opacity-50"
+                                >
+                                    Save & Connect
+                                </button>
+                            </div>
                         </div>
-
-                        <div className="flex justify-end items-center gap-4">
-                            {testStatus === 'testing' && <span className="text-gray-500 text-sm flex items-center gap-2"><div className="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div> Testing...</span>}
-                            {testStatus === 'success' && <span className="text-green-600 text-sm font-bold flex items-center gap-1"><Check size={16} /> Connected!</span>}
-                            {testStatus === 'error' && <span className="text-red-600 text-sm font-bold flex items-center gap-1"><AlertTriangle size={16} /> Connection Failed</span>}
-
-                            <button
-                                onClick={handleSave}
-                                disabled={testStatus === 'testing'}
-                                className="bg-brand-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-brand-700 transition disabled:opacity-50"
-                            >
-                                Save & Connect
-                            </button>
-                        </div>
-                    </div>
+                    )}
                 </div>
             </div>
         </div>
     );
 };
+

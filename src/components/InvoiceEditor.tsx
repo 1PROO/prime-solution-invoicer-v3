@@ -453,11 +453,11 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ data, onChange }) 
                   placeholder="Description"
                   value={item.description}
                   onChange={(e) => handleItemChange(item.id, 'description', e.target.value)}
-                  className={`${inputClass} flex-grow`}
+                  className={`${inputClass} flex-grow min-w-0`}
                 />
               </div>
-              <div className="flex gap-2 items-center">
-                <div className="w-20">
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="w-20 md:w-24">
                   <input
                     type="number"
                     placeholder="Qty"
@@ -469,7 +469,7 @@ export const InvoiceEditor: React.FC<InvoiceEditorProps> = ({ data, onChange }) 
                     lang="en"
                   />
                 </div>
-                <div className="w-28">
+                <div className="w-24 md:w-32">
                   <input
                     type="number"
                     placeholder="Price"

@@ -3,11 +3,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { InvoiceData } from './types';
 import { InvoiceEditor } from './components/InvoiceEditor';
 import { InvoicePreview } from './components/InvoicePreview';
-import { Printer, Download, History, X, Save, FileText, Database, Upload, FileDown, Plus, Search, Cloud, CloudOff, RefreshCw, Settings } from 'lucide-react';
+import { InvoicesList } from './components/InvoicesList';
+import { Printer, History, X, Save, Database, Upload, FileDown, Plus, Search, Cloud, RefreshCw, Settings, LogOut, FileText, User } from 'lucide-react';
 import { BrandLogo } from './components/BrandLogo';
 import { SettingsModal } from './components/SettingsModal';
 import { SyncService } from './services/SyncService';
 import { InvoiceService } from './services/InvoiceService';
+import { useAuth } from './context/AuthContext';
+import { LoginPage } from './components/LoginPage';
 
 const STORAGE_KEY = 'prime_solution_invoice_data';
 const HISTORY_KEY = 'prime_solution_invoice_history';
@@ -16,9 +19,11 @@ const INVENTORY_KEY = 'prime_saved_items';
 const initialInvoice = InvoiceService.createEmptyDraft();
 
 export default function App() {
+  const { user, logout } = useAuth();
+  const [activeView, setActiveView] = useState<'create' | 'list'>('create');
+
   const [invoice, setInvoice] = useState<InvoiceData>(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
-    // If we have a saved draft, use it. Otherwise create a NEW unique draft.
     return saved ? JSON.parse(saved) : initialInvoice;
   });
 
@@ -36,14 +41,25 @@ export default function App() {
   const [updateStatus, setUpdateStatus] = useState<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // -- Effects --
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(invoice));
   }, [invoice]);
 
-  // Update history storage whenever it changes
   useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(invoiceHistory));
   }, [invoiceHistory]);
+
+  // Handle "Created By" tracking when User logs in
+  useEffect(() => {
+    if (user && !invoice.createdBy) {
+      setInvoice(prev => ({ ...prev, createdBy: user.name }));
+    }
+  }, [user]);
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   const handlePrint = () => window.print();
 
@@ -51,7 +67,10 @@ export default function App() {
 
   const handleNewInvoice = () => {
     if (confirm(invoice.language === 'ar' ? 'إنشاء فاتورة جديدة؟ سيتم فقدان التغييرات غير المحفوظة.' : 'Create new invoice? Unsaved changes will be lost.')) {
-      setInvoice(InvoiceService.createEmptyDraft());
+      const newDraft = InvoiceService.createEmptyDraft();
+      if (user) newDraft.createdBy = user.name;
+      setInvoice(newDraft);
+      setActiveView('create');
     }
   };
 
@@ -70,6 +89,11 @@ export default function App() {
         newInv.invoiceNumber = InvoiceService.generateOfflineId();
         newInv.tempId = newInv.invoiceNumber;
       }
+    }
+
+    // Ensure createdBy is set
+    if (!newInv.createdBy && user) {
+      newInv.createdBy = user.name;
     }
 
     // 2. Save locally first (Optimistic UI)
@@ -127,24 +151,8 @@ export default function App() {
       }
     }
 
-    // 2. SYNC DOWN (Fetch Latest)
-    const latest = await SyncService.fetchLatest();
-    if (latest.length > 0) {
-      // Merge strategy: Add ones we don't have
-      const newHistory = [...currentHistory];
-      let added = 0;
-      latest.forEach(remoteInv => {
-        if (!newHistory.find(local => local.invoiceNumber === remoteInv.invoiceNumber)) {
-          newHistory.push(remoteInv);
-          added++;
-        }
-      });
-      if (added > 0) {
-        // Sort by Invoice Number desc
-        newHistory.sort((a, b) => b.invoiceNumber.localeCompare(a.invoiceNumber));
-        setInvoiceHistory(newHistory);
-      }
-    }
+    // 2. SYNC DOWN (Fetch Latest) - Optional for this button, but good practice
+    // For now we keep it simple or we can fetch latest to update local cache
 
     setIsSyncing(false);
   };
@@ -163,6 +171,7 @@ export default function App() {
     if (confirm('Load this invoice?')) {
       setInvoice(savedInvoice);
       setShowHistory(false);
+      setActiveView('create');
     }
   };
 
@@ -232,91 +241,128 @@ export default function App() {
   return (
     <div className={`min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 flex flex-col ${invoice.language === 'ar' ? 'font-cairo' : 'font-inter'}`}>
 
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} isAdmin={user.role === 'admin'} />
 
       {/* Navbar */}
       <nav className="no-print bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <div className="bg-brand-500 rounded p-1">
-              <BrandLogo variant="light" className="scale-50 origin-center" />
+              <BrandLogo variant="light" className="scale-60 origin-center" />
             </div>
-            <span className="font-bold text-xl text-gray-800 hidden sm:block">Prime Invoicer</span>
+            <span className="font-bold text-xl text-gray-800 hidden md:block">Prime Invoicer</span>
 
-            {/* New Invoice Button using Plus Icon */}
-            <button
-              onClick={handleNewInvoice}
-              className="ml-4 flex items-center gap-2 bg-brand-50 text-brand-600 px-3 py-1.5 rounded-full text-xs font-bold hover:bg-brand-100 transition border border-brand-200"
-            >
-              <Plus size={14} /> New Invoice
-            </button>
+            {/* Navigation Tabs */}
+            <div className="ml-6 flex bg-gray-100 rounded-lg p-1">
+              <button
+                onClick={() => setActiveView('create')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${activeView === 'create' ? 'bg-white shadow text-brand-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Create
+              </button>
+              <button
+                onClick={() => setActiveView('list')}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${activeView === 'list' ? 'bg-white shadow text-brand-600' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                All Invoices
+              </button>
+            </div>
           </div>
 
-          <div className="flex gap-2 md:gap-3 items-center">
+          <div className="flex gap-2 items-center">
+
+            <div className='hidden md:flex flex-col items-end mr-2'>
+              <span className='text-xs text-gray-400 font-medium uppercase'>Logged in as</span>
+              <span className='text-sm font-bold text-gray-700 flex items-center gap-1'>
+                <User size={14} className='text-brand-500' /> {user.name}
+              </span>
+            </div>
 
             {/* Sync Button */}
             <button
               onClick={() => performSync()}
               disabled={isSyncing}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition
+              className={`p-2 rounded-lg text-sm font-medium transition
                  ${isSyncing ? 'bg-yellow-50 text-yellow-600' : 'hover:bg-gray-100 text-gray-600'}
                `}
-              title="Sync with Cloud"
+              title="Sync Pending Invoices"
             >
-              {isSyncing ? <RefreshCw size={18} className="animate-spin" /> : <Cloud size={18} />}
-              <span className="hidden lg:inline">Sync</span>
+              <RefreshCw size={20} className={isSyncing ? "animate-spin" : ""} />
             </button>
 
-
-            {/* History Button */}
+            {/* Local History (Legacy) */}
             <button
               onClick={() => setShowHistory(true)}
-              className="flex items-center gap-2 text-gray-600 hover:text-brand-600 px-3 py-2 rounded-lg font-medium transition text-sm mr-2"
+              className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition"
+              title="Local Drafts"
             >
               <History size={20} />
-              <span className="hidden sm:inline">History</span>
             </button>
 
-            {/* Settings Button */}
+            {/* Settings (Admin Only) */}
+            {user.role === 'admin' && (
+              <button
+                onClick={() => setShowSettings(true)}
+                className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-lg"
+                title="Settings"
+              >
+                <Settings size={20} />
+              </button>
+            )}
+
+            <div className="h-6 w-px bg-gray-300 mx-1"></div>
+
+            {/* Save Button (Only in Create Mode) */}
+            {activeView === 'create' && (
+              <>
+                <button
+                  onClick={saveToHistory}
+                  className="hidden sm:flex items-center gap-2 text-white bg-brand-600 hover:bg-brand-700 px-4 py-2 rounded-lg font-medium transition text-sm shadow-sm"
+                >
+                  <Save size={18} />
+                  <span>Save</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadPDF}
+                  className="flex items-center gap-2 bg-gray-50 border border-gray-300 hover:bg-gray-100 text-gray-700 p-2 rounded-lg font-medium transition shadow-sm text-sm"
+                  title="Print / Download PDF"
+                >
+                  <Printer size={18} />
+                </button>
+              </>
+            )}
+
             <button
-              onClick={() => setShowSettings(true)}
-              className="text-gray-400 hover:text-gray-600 p-2"
-              title="Settings"
+              onClick={logout}
+              className='ml-2 text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-lg transition'
+              title="Logout"
             >
-              <Settings size={20} />
+              <LogOut size={20} />
             </button>
 
-            {/* Save Button */}
-            <button
-              onClick={saveToHistory}
-              className="flex items-center gap-2 text-white bg-brand-600 hover:bg-brand-700 px-4 py-2 rounded-lg font-medium transition text-sm shadow-sm"
-            >
-              <Save size={18} />
-              <span className="hidden sm:inline">Save & Issue</span>
-            </button>
-
-            <button
-              onClick={handleDownloadPDF}
-              className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 md:px-4 py-2 rounded-lg font-medium transition shadow-sm hover:shadow-md text-sm"
-            >
-              <Printer size={18} />
-            </button>
           </div>
         </div>
       </nav>
 
-      {/* Main Content */}
-      <main className="flex-grow p-4 md:p-8 max-w-[1600px] mx-auto w-full relative">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          <div className="lg:col-span-4 no-print">
-            <InvoiceEditor data={invoice} onChange={setInvoice} />
-          </div>
-          <div className="lg:col-span-8 sticky top-24">
-            <div className={`flex flex-col items-center p-4 rounded-xl transition-all bg-gray-50 border-2 border-dashed border-gray-200 shadow-sm print:shadow-none print:border-none print:bg-white print:p-0 print:m-0`}>
-              <InvoicePreview data={invoice} onUpdate={setInvoice} />
+      {/* Main Content Switch */}
+      <main className="flex-grow w-full relative">
+        {activeView === 'list' ? (
+          <InvoicesList onLoadInvoice={loadFromHistory} />
+        ) : (
+          <div className="p-4 md:p-8 max-w-[1600px] mx-auto w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              <div className="lg:col-span-4 no-print order-2 lg:order-1">
+                <InvoiceEditor data={invoice} onChange={setInvoice} />
+              </div>
+              <div className="lg:col-span-8 sticky top-24 order-1 lg:order-2 mb-8 lg:mb-0">
+                <div className={`flex flex-col items-center p-4 rounded-xl transition-all bg-gray-50 border-2 border-dashed border-gray-200 shadow-sm print:shadow-none print:border-none print:bg-white print:p-0 print:m-0 overflow-x-auto`}>
+                  <InvoicePreview data={invoice} onUpdate={setInvoice} />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </main>
 
       {/* History Sidebar with Search */}
@@ -327,7 +373,7 @@ export default function App() {
             <div className="p-4 border-b bg-gray-50">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-bold text-lg flex items-center gap-2 text-gray-800">
-                  <History size={20} /> Invoice History
+                  <History size={20} /> Local Drafts
                 </h2>
                 <button onClick={() => setShowHistory(false)} className="p-2 hover:bg-gray-200 rounded-full">
                   <X size={20} />
@@ -349,8 +395,7 @@ export default function App() {
             <div className="flex-grow overflow-y-auto p-4 space-y-3">
               {filteredHistory.length === 0 ? (
                 <div className="text-center py-12 text-gray-400">
-                  <p>No invoices found.</p>
-                  <p className="text-sm mt-2">Click "Save" or "Download PDF" to add invoices here.</p>
+                  <p>No invoices found in local storage.</p>
                 </div>
               ) : (
                 filteredHistory.map((inv) => (
