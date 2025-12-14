@@ -16,18 +16,28 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+    // Check if running in Electron
+    const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI?.isElectron;
+
     const [user, setUser] = useState<User | null>(() => {
+        // In Electron, auto-login as Admin
+        if (isElectron) {
+            return { name: 'Admin', role: 'admin' };
+        }
         const saved = localStorage.getItem('prime_auth_user');
         return saved ? JSON.parse(saved) : null;
     });
 
     useEffect(() => {
+        // Don't persist to localStorage in Electron (always Admin)
+        if (isElectron) return;
+
         if (user) {
             localStorage.setItem('prime_auth_user', JSON.stringify(user));
         } else {
             localStorage.removeItem('prime_auth_user');
         }
-    }, [user]);
+    }, [user, isElectron]);
 
     const login = async (password: string, name?: string) => {
         if (password === ADMIN_PASS) {

@@ -37,17 +37,30 @@ export const SyncService = {
         if (!url) return { status: 'error', message: "No Sync URL Configured" };
         if (!navigator.onLine) return { status: 'offline', message: "No Internet Connection" };
 
+        console.log('[SyncService] Syncing invoices:', pendingInvoices.length);
+        console.log('[SyncService] URL:', url);
+
         try {
+            const payload = {
+                action: 'SYNC_INVOICES',
+                invoices: pendingInvoices.map(inv => ({
+                    ...inv,
+                    total: inv.items.reduce((sum, item) => sum + (item.quantity * item.price), 0)
+                }))
+            };
+
+            console.log('[SyncService] Payload:', JSON.stringify(payload).slice(0, 500));
+
             const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain' }, // Avoid Options preflight issues with GAS
-                body: JSON.stringify({
-                    action: 'SYNC_INVOICES',
-                    invoices: pendingInvoices
-                })
+                body: JSON.stringify(payload)
             });
 
+            console.log('[SyncService] Response status:', response.status);
+
             const data = await response.json();
+            console.log('[SyncService] Response data:', data);
 
             if (data.status === 'success') {
                 return {
@@ -55,11 +68,12 @@ export const SyncService = {
                     idMapping: data.idMapping
                 };
             } else {
-                return { status: 'error', message: data.message };
+                return { status: 'error', message: data.message || 'Unknown server error' };
             }
 
-        } catch (e) {
-            return { status: 'error', message: "Network Request Failed" };
+        } catch (e: any) {
+            console.error('[SyncService] Sync failed:', e);
+            return { status: 'error', message: e.message || "Network Request Failed" };
         }
     },
 
