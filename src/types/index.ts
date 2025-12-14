@@ -53,4 +53,12 @@ export interface InvoiceData {
 
   // Visuals
   logoUrl: string | null;
+
+  // System / Sync Fields used by the App
+  id?: string; // Unique UUID for internal tracking (e.g. '550e8400-e29b...')
+  createdAt?: string;
+  updatedAt?: string;
+  syncStatus?: 'synced' | 'pending' | 'error' | 'unsaved'; // 'unsaved' = new draft
+  tempId?: string; // Stores the local ID (e.g. 'OFF-1718...') if currently pending sync
+  lastSyncError?: string;
 }
