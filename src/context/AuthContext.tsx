@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { ADMIN_PASS, USER_PASS } from '../constants/config';
+import { SyncService } from '../services/SyncService';
 
 interface User {
     name: string;
@@ -9,8 +9,9 @@ interface User {
 
 interface AuthContextType {
     user: User | null;
-    login: (password: string, name?: string) => Promise<boolean>;
+    login: (username: string, password: string) => Promise<{ success: boolean; message?: string; suspended?: boolean }>;
     logout: () => void;
+    isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -28,6 +29,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return saved ? JSON.parse(saved) : null;
     });
 
+    const [isLoading, setIsLoading] = useState(false);
+
     useEffect(() => {
         // Don't persist to localStorage in Electron (always Admin)
         if (isElectron) return;
@@ -39,19 +42,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     }, [user, isElectron]);
 
-    const login = async (password: string, name?: string) => {
-        if (password === ADMIN_PASS) {
-            setUser({ name: 'Admin', role: 'admin' });
-            return true;
-        }
+    const login = async (username: string, password: string) => {
+        setIsLoading(true);
 
-        if (password === USER_PASS) {
-            if (!name) return false;
-            setUser({ name: name, role: 'user' });
-            return true;
-        }
+        try {
+            const result = await SyncService.login(username, password);
 
-        return false;
+            if (result.status === 'suspended') {
+                setIsLoading(false);
+                return {
+                    success: false,
+                    message: result.message || 'حسابك معطل حالياً. تواصل مع الدعم الفني.',
+                    suspended: true
+                };
+            }
+
+            if (result.status === 'success' && result.user) {
+                setUser({
+                    name: result.user.name,
+                    role: result.user.role as 'admin' | 'user'
+                });
+                setIsLoading(false);
+                return { success: true };
+            }
+
+            setIsLoading(false);
+            return {
+                success: false,
+                message: result.message || 'فشل تسجيل الدخول'
+            };
+        } catch (e) {
+            console.error("Login error", e);
+            setIsLoading(false);
+            return {
+                success: false,
+                message: 'فشل الاتصال بالسيرفر'
+            };
+        }
     };
 
     const logout = () => {
@@ -59,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, login, logout }}>
+        <AuthContext.Provider value={{ user, login, logout, isLoading }}>
             {children}
         </AuthContext.Provider>
     );

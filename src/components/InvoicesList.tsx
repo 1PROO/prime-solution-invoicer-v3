@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { SyncService } from '../services/SyncService';
 import { InvoiceData } from '../types';
-import { Search, RefreshCw, FileText, ArrowRight, Wallet } from 'lucide-react'; // Wallet icon works as "Bill/Invoice" generic
+import { Search, RefreshCw, FileText, ArrowRight } from 'lucide-react';
 import { InvoiceService } from '../services/InvoiceService';
 
 interface Props {
@@ -10,32 +10,46 @@ interface Props {
 }
 
 export function InvoicesList({ onLoadInvoice }: Props) {
-    const [invoices, setInvoices] = useState<InvoiceData[]>([]);
+    // Load from cache immediately
+    const [invoices, setInvoices] = useState<InvoiceData[]>(() => SyncService.getCachedInvoices());
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
     const [error, setError] = useState('');
+    const [lastSync, setLastSync] = useState<string | null>(SyncService.getLastSyncTime());
 
-    const loadData = async () => {
+    const loadData = async (forceRefresh = false) => {
         setLoading(true);
         setError('');
-        // Ensure we are online and have a URL (which we do via config now)
+
         try {
-            const data = await SyncService.fetchLatest();
-            if (data.length === 0) {
-                // It might be empty or error, but let's assume empty for now if no error thrown
+            // If we have cached data and not forcing refresh, use it
+            if (!forceRefresh && invoices.length > 0) {
+                setLoading(false);
+                return;
             }
-            //Sort by ID desc
+
+            const data = await SyncService.fetchAllInvoices();
+            // Sort by ID desc
             data.sort((a, b) => b.invoiceNumber.localeCompare(a.invoiceNumber));
             setInvoices(data);
+            setLastSync(SyncService.getLastSyncTime());
         } catch (e) {
             setError('Failed to load invoices. Check connection.');
+            // Fall back to cache
+            const cached = SyncService.getCachedInvoices();
+            if (cached.length > 0) {
+                setInvoices(cached);
+            }
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        loadData();
+        // If cache is empty, fetch from server
+        if (invoices.length === 0) {
+            loadData(true);
+        }
     }, []);
 
     const filtered = invoices.filter(inv => {
@@ -45,12 +59,31 @@ export function InvoicesList({ onLoadInvoice }: Props) {
             inv.date.includes(s);
     });
 
+    const formatSyncTime = (isoString: string | null) => {
+        if (!isoString) return '';
+        const date = new Date(isoString);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto animate-in fade-in duration-500">
+        <div className="p-4 md:p-8 max-w-7xl mx-auto h-full overflow-y-auto animate-in fade-in duration-500">
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">All Invoices</h1>
-                    <p className="text-gray-500 text-sm">Fetched from Google Sheets</p>
+                    <p className="text-gray-500 text-sm flex items-center gap-2">
+                        <span className="flex items-center gap-1">
+                            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                            {invoices.length} invoices
+                        </span>
+                        {lastSync && (
+                            <span className="text-gray-400">• Last sync: {formatSyncTime(lastSync)}</span>
+                        )}
+                    </p>
                 </div>
 
                 <div className="flex gap-2 w-full md:w-auto">
@@ -64,9 +97,10 @@ export function InvoicesList({ onLoadInvoice }: Props) {
                         />
                     </div>
                     <button
-                        onClick={loadData}
+                        onClick={() => loadData(true)}
                         disabled={loading}
-                        className="p-2 bg-white border hover:bg-gray-50 rounded-lg text-gray-600 transition"
+                        className="p-2 bg-white border hover:bg-gray-50 rounded-lg text-gray-600 transition flex items-center gap-1"
+                        title="Refresh from server"
                     >
                         <RefreshCw size={20} className={loading ? "animate-spin" : ""} />
                     </button>
@@ -94,15 +128,13 @@ export function InvoicesList({ onLoadInvoice }: Props) {
                                         <FileText size={20} />
                                     </div>
                                     <div>
-                                        <h3 className="font-bold text-gray-800">{inv.clientName}</h3>
+                                        <h3 className="font-bold text-gray-800">{inv.clientName || 'Unnamed'}</h3>
                                         <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">{inv.invoiceNumber}</span>
                                     </div>
                                 </div>
-                                {inv.status === 'Paid' ? (
-                                    <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded">PAID</span>
-                                ) : (
-                                    <span className="text-[10px] font-bold bg-gray-100 text-gray-600 px-2 py-1 rounded">Unpaid</span>
-                                )}
+                                <span className={`text-[10px] font-bold px-2 py-1 rounded ${inv.syncStatus === 'synced' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                    {inv.syncStatus === 'synced' ? 'Synced' : 'Pending'}
+                                </span>
                             </div>
 
                             <div className="flex justify-between items-end border-t border-gray-50 pt-3 mt-1">
@@ -119,7 +151,7 @@ export function InvoicesList({ onLoadInvoice }: Props) {
                             </div>
                             <div className="mt-2 text-right">
                                 <span className="text-[10px] text-gray-400">{inv.date}</span>
-                                {/* We can add 'Created By' if it exists in the data later */}
+                                {inv.createdBy && <span className="text-[10px] text-gray-400 ml-2">• by {inv.createdBy}</span>}
                             </div>
                         </div>
                     ))}
