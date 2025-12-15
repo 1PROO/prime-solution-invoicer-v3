@@ -1,19 +1,21 @@
 /**
  * PRIME SOLUTION INVOICER - GOOGLE APPS SCRIPT
  * ---------------------------------------------
- * Complete backend with: Invoices, Products, Users, Settings
+ * Complete backend with: Invoices, Products, Users, Settings, Activity
  * 
  * SHEETS STRUCTURE:
- * - Sheet1 (Invoices): Invoice data
- * - Sheet2 (Products): Product catalog
- * - Sheet3 (Users): User management & settings
- * - Sheet4 (Activity): Login activity log
+ * - Invoices: Invoice data
+ * - Products: Product catalog
+ * - Users: User management & settings
+ * - Activity: Login activity log
+ * - GlobalSettings: Default app configuration
  */
 
 const INVOICES_SHEET = 'Invoices';
 const PRODUCTS_SHEET = 'Products';
 const USERS_SHEET = 'Users';
 const ACTIVITY_SHEET = 'Activity';
+const GLOBAL_SHEET = 'GlobalSettings';
 const LOCK_WAIT_MS = 30000;
 
 // ============ SETUP ============
@@ -21,7 +23,7 @@ const LOCK_WAIT_MS = 30000;
 function setup() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // Setup Invoices Sheet
+    // 1. Invoices
     let invSheet = ss.getSheetByName(INVOICES_SHEET);
     if (!invSheet) {
         invSheet = ss.insertSheet(INVOICES_SHEET);
@@ -29,33 +31,51 @@ function setup() {
         invSheet.setFrozenRows(1);
     }
 
-    // Setup Products Sheet
+    // 2. Products
     let prodSheet = ss.getSheetByName(PRODUCTS_SHEET);
     if (!prodSheet) {
         prodSheet = ss.insertSheet(PRODUCTS_SHEET);
         prodSheet.appendRow(['ID', 'Description (AR)', 'Description (EN)', 'Price']);
         prodSheet.setFrozenRows(1);
         prodSheet.appendRow(['prod_001', 'تركيب كاميرات مراقبة', 'Security Camera Installation', 5000]);
-        prodSheet.appendRow(['prod_002', 'عقد صيانة سنوي', 'Annual Maintenance Contract', 1200]);
-        prodSheet.appendRow(['prod_003', 'استشارة فنية', 'Technical Consultation', 500]);
     }
 
-    // Setup Users Sheet
+    // 3. Users (Updated Columns)
     let usersSheet = ss.getSheetByName(USERS_SHEET);
     if (!usersSheet) {
         usersSheet = ss.insertSheet(USERS_SHEET);
-        usersSheet.appendRow(['Username', 'Password', 'Role', 'Status', 'Created At']);
+        usersSheet.appendRow(['Username', 'Password', 'Role', 'Status', 'Date', 'Permissions (JSON)', 'Suspension Message']);
         usersSheet.setFrozenRows(1);
-        // Default Admin User
-        usersSheet.appendRow(['Admin', 'Ahmed@admin', 'admin', 'active', new Date().toISOString()]);
+        usersSheet.appendRow(['Admin', 'Ahmed@admin', 'admin', 'active', new Date().toISOString(), '{}', '']);
+    } else {
+        // Upgrade existing sheet if needed (Simple check: header length)
+        const headers = usersSheet.getRange(1, 1, 1, usersSheet.getLastColumn()).getValues()[0];
+        if (headers.length < 7) {
+            usersSheet.getRange(1, 6).setValue('Permissions (JSON)');
+            usersSheet.getRange(1, 7).setValue('Suspension Message');
+        }
     }
 
-    // Setup Activity Sheet
+    // 4. Activity
     let actSheet = ss.getSheetByName(ACTIVITY_SHEET);
     if (!actSheet) {
         actSheet = ss.insertSheet(ACTIVITY_SHEET);
         actSheet.appendRow(['Username', 'Action', 'Timestamp', 'Details']);
         actSheet.setFrozenRows(1);
+    }
+
+    // 5. Global Settings
+    let globalSheet = ss.getSheetByName(GLOBAL_SHEET);
+    if (!globalSheet) {
+        globalSheet = ss.insertSheet(GLOBAL_SHEET);
+        globalSheet.appendRow(['Key', 'Value (JSON)']); // Simple Key-Value store
+        globalSheet.setFrozenRows(1);
+        // Default entries
+        globalSheet.appendRow(['SELLER_INFO', JSON.stringify({
+            name: '', address: '', phone: '', email: ''
+        })]);
+        globalSheet.appendRow(['DEFAULT_NOTES_AR', JSON.stringify('يرجى التحويل لحساب ...')]);
+        globalSheet.appendRow(['DEFAULT_NOTES_EN', JSON.stringify('Please transfer to account...')]);
     }
 }
 
@@ -65,57 +85,38 @@ function doPost(e) {
     const lock = LockService.getScriptLock();
 
     try {
-        const success = lock.tryLock(LOCK_WAIT_MS);
-        if (!success) {
-            return errorResponse("Server is busy, try again.");
-        }
+        if (!lock.tryLock(LOCK_WAIT_MS)) return errorResponse("Server busy");
 
         const payload = JSON.parse(e.postData.contents);
         const action = payload.action;
 
         switch (action) {
-            // Invoice Operations
-            case 'SYNC_INVOICES':
-                return handleSyncInvoices(payload.invoices);
-            case 'GET_ALL_INVOICES':
-                return handleGetAllInvoices();
-            case 'GET_NEXT_ID':
-                return handleGetNextId();
+            // --- INVOICES ---
+            case 'SYNC_INVOICES': return handleSyncInvoices(payload.invoices);
+            case 'GET_ALL_INVOICES': return handleGetAllInvoices();
+            case 'GET_NEXT_ID': return handleGetNextId();
 
-            // Product Operations
-            case 'GET_PRODUCTS':
-                return handleGetProducts();
-            case 'SAVE_PRODUCT':
-                return handleSaveProduct(payload.product);
-            case 'DELETE_PRODUCT':
-                return handleDeleteProduct(payload.productId);
+            // --- PRODUCTS ---
+            case 'GET_PRODUCTS': return handleGetProducts();
+            case 'SAVE_PRODUCT': return handleSaveProduct(payload.product);
+            case 'DELETE_PRODUCT': return handleDeleteProduct(payload.productId);
 
-            // User Operations
-            case 'LOGIN':
-                return handleLogin(payload.username, payload.password);
-            case 'GET_USERS':
-                return handleGetUsers();
-            case 'CREATE_USER':
-                return handleCreateUser(payload.user);
-            case 'UPDATE_USER':
-                return handleUpdateUser(payload.user);
-            case 'DELETE_USER':
-                return handleDeleteUser(payload.username);
+            // --- USERS & AUTH ---
+            case 'LOGIN': return handleLogin(payload.username, payload.password);
+            case 'GET_USERS': return handleGetUsers();
+            case 'CREATE_USER': return handleCreateUser(payload.user);
+            case 'UPDATE_USER': return handleUpdateUser(payload.user);
+            case 'DELETE_USER': return handleDeleteUser(payload.username);
 
-            // Connection Check
-            case 'PING':
-                return jsonResponse({ status: 'success', message: 'Connected' });
+            // --- GLOBAL SETTINGS ---
+            case 'GET_GLOBAL_DEFAULTS': return handleGetGlobalDefaults();
+            case 'SAVE_GLOBAL_DEFAULTS': return handleSaveGlobalDefaults(payload.defaults);
 
-            // Activity
-            case 'GET_ACTIVITY':
-                return handleGetActivity();
+            // --- UTILS ---
+            case 'PING': return jsonResponse({ status: 'success', message: 'Connected' });
+            case 'GET_ACTIVITY': return handleGetActivity();
 
-            // Legacy
-            case 'GET_LATEST':
-                return handleGetAllInvoices();
-
-            default:
-                return errorResponse("Unknown action: " + action);
+            default: return errorResponse("Unknown action: " + action);
         }
 
     } catch (err) {
@@ -128,222 +129,213 @@ function doPost(e) {
 // ============ USER OPERATIONS ============
 
 function handleLogin(username, password) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(USERS_SHEET);
+    const sheet = getSheet(USERS_SHEET);
+    if (!sheet) return errorResponse("System error: Users sheet missing");
 
-    if (!sheet) {
-        return errorResponse("Users not configured");
-    }
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return errorResponse("No users found");
-    }
-
-    const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-
-    for (let i = 0; i < data.length; i++) {
+    const data = sheet.getDataRange().getValues(); // Get all data
+    // Skip header, find user
+    for (let i = 1; i < data.length; i++) {
         if (data[i][0] === username && data[i][1] === password) {
             const role = data[i][2];
             const status = data[i][3];
+            const perms = data[i][5] ? JSON.parse(data[i][5]) : {};
+            const suspensionMsg = data[i][6] || '';
 
-            // Check if suspended
             if (status === 'suspended') {
                 return jsonResponse({
                     status: 'suspended',
-                    message: 'حسابك معطل حالياً. تواصل مع الدعم الفني.'
+                    message: suspensionMsg || 'Account suspended. Contact Admin.'
                 });
             }
 
-            // Log activity
-            logActivity(username, 'login', 'Successful login');
-
+            logActivity(username, 'login', 'Success');
             return jsonResponse({
                 status: 'success',
                 user: {
                     name: username,
                     role: role,
-                    status: status
+                    permissions: perms
                 }
             });
         }
     }
-
-    return jsonResponse({
-        status: 'error',
-        message: 'اسم المستخدم أو كلمة المرور غير صحيحة'
-    });
+    return jsonResponse({ status: 'error', message: 'Invalid credentials' });
 }
 
 function handleGetUsers() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(USERS_SHEET);
+    const sheet = getSheet(USERS_SHEET);
+    if (!sheet) return jsonResponse({ users: [] });
 
-    if (!sheet) {
-        return jsonResponse({ users: [] });
+    const data = sheet.getDataRange().getValues();
+    const users = [];
+
+    // Skip header
+    for (let i = 1; i < data.length; i++) {
+        users.push({
+            username: data[i][0],
+            password: data[i][1], // Only admin calls this, so exposing pass is "ok" for this requirement
+            role: data[i][2],
+            status: data[i][3],
+            createdAt: data[i][4],
+            permissions: data[i][5] ? JSON.parse(data[i][5]) : {},
+            suspensionMessage: data[i][6]
+        });
     }
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return jsonResponse({ users: [] });
-    }
-
-    const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
-
-    const users = data.map(row => ({
-        username: row[0],
-        role: row[2],
-        status: row[3],
-        createdAt: row[4]
-    }));
-
     return jsonResponse({ users: users });
 }
 
 function handleCreateUser(user) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(USERS_SHEET);
+    const sheet = getSheet(USERS_SHEET);
+    if (!sheet) { setup(); return handleCreateUser(user); }
 
-    if (!sheet) {
-        setup();
-        sheet = ss.getSheetByName(USERS_SHEET);
+    // Check existing
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === user.username) return errorResponse("Username exists");
     }
 
-    // Check if username exists
-    const lastRow = sheet.getLastRow();
-    if (lastRow > 1) {
-        const usernames = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        for (let i = 0; i < usernames.length; i++) {
-            if (usernames[i][0] === user.username) {
-                return errorResponse("اسم المستخدم موجود بالفعل");
-            }
-        }
-    }
-
-    // Add new user
     sheet.appendRow([
         user.username,
         user.password,
         user.role || 'user',
         'active',
-        new Date().toISOString()
+        new Date().toISOString(),
+        JSON.stringify(user.permissions || {}),
+        ''
     ]);
-
-    return jsonResponse({ status: 'success', message: 'تم إنشاء المستخدم بنجاح' });
+    return jsonResponse({ status: 'success' });
 }
 
 function handleUpdateUser(user) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(USERS_SHEET);
+    const sheet = getSheet(USERS_SHEET);
+    if (!sheet) return errorResponse("Sheet missing");
 
-    if (!sheet) {
-        return errorResponse("Users sheet not found");
-    }
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === user.username) {
+            const row = i + 1;
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return errorResponse("User not found");
-    }
+            // Protect Admin
+            if (user.username === 'Admin' && user.role && user.role !== 'admin') {
+                return errorResponse("Cannot change Admin role");
+            }
 
-    const usernames = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+            if (user.password) sheet.getRange(row, 2).setValue(user.password);
+            if (user.role) sheet.getRange(row, 3).setValue(user.role);
+            if (user.status) sheet.getRange(row, 4).setValue(user.status);
+            if (user.permissions) sheet.getRange(row, 6).setValue(JSON.stringify(user.permissions));
+            if (user.suspensionMessage !== undefined) sheet.getRange(row, 7).setValue(user.suspensionMessage);
 
-    for (let i = 0; i < usernames.length; i++) {
-        if (usernames[i][0] === user.username) {
-            const rowNum = i + 2;
-            // Update role and status (columns 3 and 4)
-            if (user.role) sheet.getRange(rowNum, 3).setValue(user.role);
-            if (user.status) sheet.getRange(rowNum, 4).setValue(user.status);
-            if (user.password) sheet.getRange(rowNum, 2).setValue(user.password);
-
-            return jsonResponse({ status: 'success', message: 'تم تحديث المستخدم' });
+            return jsonResponse({ status: 'success' });
         }
     }
-
     return errorResponse("User not found");
 }
 
 function handleDeleteUser(username) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(USERS_SHEET);
+    if (username === 'Admin') return errorResponse("Cannot delete Main Admin");
 
-    if (!sheet) {
-        return errorResponse("Users sheet not found");
-    }
+    const sheet = getSheet(USERS_SHEET);
+    const data = sheet.getDataRange().getValues();
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return errorResponse("User not found");
-    }
-
-    const usernames = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-
-    for (let i = 0; i < usernames.length; i++) {
-        if (usernames[i][0] === username) {
-            sheet.deleteRow(i + 2);
-            return jsonResponse({ status: 'success', message: 'تم حذف المستخدم' });
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === username) {
+            sheet.deleteRow(i + 1);
+            return jsonResponse({ status: 'success' });
         }
     }
-
     return errorResponse("User not found");
 }
 
-// ============ ACTIVITY LOGGING ============
+// ============ GLOBAL SETTINGS ============
 
-function logActivity(username, action, details) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(ACTIVITY_SHEET);
+function handleGetGlobalDefaults() {
+    const sheet = getSheet(GLOBAL_SHEET);
+    if (!sheet) { setup(); return handleGetGlobalDefaults(); }
 
-    if (!sheet) {
-        sheet = ss.insertSheet(ACTIVITY_SHEET);
-        sheet.appendRow(['Username', 'Action', 'Timestamp', 'Details']);
-        sheet.setFrozenRows(1);
+    const data = sheet.getDataRange().getValues();
+    const defaults = {};
+
+    for (let i = 1; i < data.length; i++) {
+        const key = data[i][0];
+        try {
+            defaults[key] = JSON.parse(data[i][1]);
+        } catch (e) {
+            defaults[key] = data[i][1];
+        }
+    }
+    return jsonResponse({ defaults: defaults });
+}
+
+function handleSaveGlobalDefaults(newDefaults) {
+    const sheet = getSheet(GLOBAL_SHEET);
+    if (!sheet) { setup(); return handleSaveGlobalDefaults(newDefaults); }
+
+    const data = sheet.getDataRange().getValues();
+
+    // Update or Insert
+    for (const [key, value] of Object.entries(newDefaults)) {
+        let found = false;
+        const jsonVal = JSON.stringify(value);
+
+        for (let i = 1; i < data.length; i++) {
+            if (data[i][0] === key) {
+                sheet.getRange(i + 1, 2).setValue(jsonVal);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            sheet.appendRow([key, jsonVal]);
+        }
     }
 
+    return jsonResponse({ status: 'success' });
+}
+
+
+// ============ HELPERS & OTHERS ============
+
+function getSheet(name) {
+    return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+}
+
+function logActivity(username, action, details) {
+    let sheet = getSheet(ACTIVITY_SHEET);
+    if (!sheet) { setup(); sheet = getSheet(ACTIVITY_SHEET); }
     sheet.appendRow([username, action, new Date().toISOString(), details]);
 }
 
 function handleGetActivity() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(ACTIVITY_SHEET);
-
-    if (!sheet) {
-        return jsonResponse({ activity: [] });
-    }
+    const sheet = getSheet(ACTIVITY_SHEET);
+    if (!sheet) return jsonResponse({ activity: [] });
 
     const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return jsonResponse({ activity: [] });
-    }
+    if (lastRow <= 1) return jsonResponse({ activity: [] });
 
-    // Get last 100 activities
+    // Last 100 rows
     const startRow = Math.max(2, lastRow - 99);
     const data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
 
-    const activity = data.map(row => ({
-        username: row[0],
-        action: row[1],
-        timestamp: row[2],
-        details: row[3]
-    })).reverse();
-
-    return jsonResponse({ activity: activity });
+    return jsonResponse({
+        activity: data.map(r => ({
+            username: r[0], action: r[1], timestamp: r[2], details: r[3]
+        })).reverse()
+    });
 }
 
-// ============ INVOICE OPERATIONS ============
-
 function handleSyncInvoices(invoices) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(INVOICES_SHEET);
-    const resultMapping = {};
-
+    const sheet = getSheet(INVOICES_SHEET);
     const lastRow = sheet.getLastRow();
     let currentMaxId = 0;
 
     if (lastRow > 1) {
-        const lastIdStr = sheet.getRange(lastRow, 2).getValue().toString();
-        currentMaxId = parseInt(lastIdStr, 10) || 0;
+        const val = sheet.getRange(lastRow, 2).getValue().toString();
+        currentMaxId = parseInt(val, 10) || 0;
     }
 
+    const mapping = {};
     const newRows = [];
 
     invoices.forEach(inv => {
@@ -361,8 +353,7 @@ function handleSyncInvoices(invoices) {
         ]);
 
         if (inv.tempId || (inv.invoiceNumber && inv.invoiceNumber.startsWith('OFF-'))) {
-            const key = inv.tempId || inv.invoiceNumber;
-            resultMapping[key] = officialId;
+            mapping[inv.tempId || inv.invoiceNumber] = officialId;
         }
     });
 
@@ -372,29 +363,22 @@ function handleSyncInvoices(invoices) {
 
     return jsonResponse({
         status: 'success',
-        syncedCount: newRows.length,
-        idMapping: resultMapping,
+        idMapping: mapping,
         nextId: padNumber(currentMaxId + 1, 3)
     });
 }
 
 function handleGetAllInvoices() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(INVOICES_SHEET);
-    const lastRow = sheet.getLastRow();
+    const sheet = getSheet(INVOICES_SHEET);
+    if (!sheet || sheet.getLastRow() <= 1) return jsonResponse({ invoices: [], maxId: 0, nextId: '001' });
 
-    if (lastRow <= 1) {
-        return jsonResponse({ invoices: [], maxId: 0, nextId: '001' });
-    }
-
-    const data = sheet.getRange(2, 6, lastRow - 1, 1).getValues();
-
-    const invoices = data.map(row => {
-        try { return JSON.parse(row[0]); } catch (e) { return null; }
+    const data = sheet.getRange(2, 6, sheet.getLastRow() - 1, 1).getValues();
+    const invoices = data.map(r => {
+        try { return JSON.parse(r[0]); } catch { return null; }
     }).filter(x => x);
 
-    const lastIdStr = sheet.getRange(lastRow, 2).getValue().toString();
-    const maxId = parseInt(lastIdStr, 10) || 0;
+    const lastId = sheet.getRange(sheet.getLastRow(), 2).getValue();
+    const maxId = parseInt(lastId, 10) || 0;
 
     return jsonResponse({
         invoices: invoices.reverse(),
@@ -404,128 +388,70 @@ function handleGetAllInvoices() {
 }
 
 function handleGetNextId() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(INVOICES_SHEET);
-    const lastRow = sheet.getLastRow();
+    const sheet = getSheet(INVOICES_SHEET);
+    if (!sheet || sheet.getLastRow() <= 1) return jsonResponse({ nextId: '001' });
 
-    if (lastRow <= 1) {
-        return jsonResponse({ nextId: '001', maxId: 0 });
-    }
+    const lastId = sheet.getRange(sheet.getLastRow(), 2).getValue();
+    const maxId = parseInt(lastId, 10) || 0;
+    return jsonResponse({ nextId: padNumber(maxId + 1, 3) });
+}
 
-    const lastIdStr = sheet.getRange(lastRow, 2).getValue().toString();
-    const maxId = parseInt(lastIdStr, 10) || 0;
+function handleGetProducts() {
+    const sheet = getSheet(PRODUCTS_SHEET);
+    if (!sheet || sheet.getLastRow() <= 1) return jsonResponse({ products: [] });
 
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
     return jsonResponse({
-        nextId: padNumber(maxId + 1, 3),
-        maxId: maxId
+        products: data.map(r => ({
+            id: r[0], description: r[1], descriptionEn: r[2], price: r[3] || 0
+        })).filter(p => p.id)
     });
 }
 
-// ============ PRODUCT OPERATIONS ============
+function handleSaveProduct(p) {
+    const sheet = getSheet(PRODUCTS_SHEET);
+    if (!sheet) { setup(); return handleSaveProduct(p); }
 
-function handleGetProducts() {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(PRODUCTS_SHEET);
+    const data = sheet.getDataRange().getValues();
+    let row = -1;
 
-    if (!sheet) {
-        return jsonResponse({ products: [] });
-    }
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return jsonResponse({ products: [] });
-    }
-
-    const data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
-
-    const products = data.map(row => ({
-        id: row[0],
-        description: row[1],
-        descriptionEn: row[2],
-        price: row[3] || 0
-    })).filter(p => p.id);
-
-    return jsonResponse({ products: products });
-}
-
-function handleSaveProduct(product) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    let sheet = ss.getSheetByName(PRODUCTS_SHEET);
-
-    if (!sheet) {
-        setup();
-        sheet = ss.getSheetByName(PRODUCTS_SHEET);
-    }
-
-    const lastRow = sheet.getLastRow();
-    let foundRow = -1;
-
-    if (lastRow > 1) {
-        const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        for (let i = 0; i < ids.length; i++) {
-            if (ids[i][0] === product.id) {
-                foundRow = i + 2;
-                break;
-            }
-        }
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === p.id) { row = i + 1; break; }
     }
 
     const rowData = [
-        product.id || ('prod_' + Date.now()),
-        product.description || '',
-        product.descriptionEn || '',
-        product.price || 0
+        p.id || ('prod_' + Date.now()),
+        p.description || '', p.descriptionEn || '', p.price || 0
     ];
 
-    if (foundRow > 0) {
-        sheet.getRange(foundRow, 1, 1, 4).setValues([rowData]);
-    } else {
-        sheet.appendRow(rowData);
-    }
+    if (row > 0) sheet.getRange(row, 1, 1, 4).setValues([rowData]);
+    else sheet.appendRow(rowData);
 
-    return jsonResponse({ status: 'success', product: { ...product, id: rowData[0] } });
+    return jsonResponse({ status: 'success', product: { ...p, id: rowData[0] } });
 }
 
-function handleDeleteProduct(productId) {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(PRODUCTS_SHEET);
-
-    if (!sheet) {
-        return errorResponse("Products sheet not found");
-    }
-
-    const lastRow = sheet.getLastRow();
-    if (lastRow <= 1) {
-        return errorResponse("Product not found");
-    }
-
-    const ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-    for (let i = 0; i < ids.length; i++) {
-        if (ids[i][0] === productId) {
-            sheet.deleteRow(i + 2);
+function handleDeleteProduct(id) {
+    const sheet = getSheet(PRODUCTS_SHEET);
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+        if (data[i][0] === id) {
+            sheet.deleteRow(i + 1);
             return jsonResponse({ status: 'success' });
         }
     }
-
     return errorResponse("Product not found");
 }
 
-// ============ HELPERS ============
-
-function padNumber(num, length) {
-    let s = num.toString();
-    while (s.length < length) s = "0" + s;
+function padNumber(n, l) {
+    let s = n.toString();
+    while (s.length < l) s = "0" + s;
     return s;
 }
 
-function jsonResponse(data) {
-    return ContentService.createTextOutput(JSON.stringify(data))
-        .setMimeType(ContentService.MimeType.JSON);
+function jsonResponse(d) {
+    return ContentService.createTextOutput(JSON.stringify(d)).setMimeType(ContentService.MimeType.JSON);
 }
 
-function errorResponse(msg) {
-    return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        message: msg
-    })).setMimeType(ContentService.MimeType.JSON);
+function errorResponse(m) {
+    return jsonResponse({ status: 'error', message: m });
 }

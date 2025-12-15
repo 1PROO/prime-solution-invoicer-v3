@@ -1,6 +1,6 @@
 /**
  * SyncService - Handles all communication with Google Apps Script
- * Features: Invoice sync, Products sync, User management, Connection status
+ * Features: Invoice sync, Products sync, User management, Connection status, Global Settings
  */
 
 import { InvoiceData, SavedItem } from '../types';
@@ -13,12 +13,14 @@ interface SyncResult {
     nextId?: string;
 }
 
-interface UserData {
+export interface UserData {
     username: string;
-    password?: string;
-    role: 'admin' | 'user';
+    password?: string; // Admin only
+    role: 'admin' | 'user' | string;
     status: 'active' | 'suspended';
     createdAt?: string;
+    permissions?: Record<string, boolean>;
+    suspensionMessage?: string;
 }
 
 interface LoginResult {
@@ -27,7 +29,7 @@ interface LoginResult {
     user?: {
         name: string;
         role: string;
-        status: string;
+        permissions?: Record<string, boolean>;
     };
 }
 
@@ -141,7 +143,7 @@ class SyncServiceClass {
         }
     }
 
-    async createUser(user: { username: string; password: string; role: string }): Promise<{ status: string; message?: string }> {
+    async createUser(user: Partial<UserData>): Promise<{ status: string; message?: string }> {
         const url = this.getScriptUrl();
         if (!url) return { status: 'error', message: 'Script URL not configured' };
 
@@ -161,7 +163,7 @@ class SyncServiceClass {
         }
     }
 
-    async updateUser(user: { username: string; role?: string; status?: string; password?: string }): Promise<{ status: string; message?: string }> {
+    async updateUser(user: Partial<UserData>): Promise<{ status: string; message?: string }> {
         const url = this.getScriptUrl();
         if (!url) return { status: 'error', message: 'Script URL not configured' };
 
@@ -197,6 +199,42 @@ class SyncServiceClass {
         } catch (e) {
             console.error("Delete user failed", e);
             this.setConnectionStatus('disconnected');
+            return false;
+        }
+    }
+
+    // ============ GLOBAL SETTINGS ============
+
+    async getGlobalDefaults(): Promise<any> {
+        const url = this.getScriptUrl();
+        if (!url) return {};
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: 'GET_GLOBAL_DEFAULTS' })
+            });
+            const data = await response.json();
+            return data.defaults || {};
+        } catch (e) {
+            console.error(e);
+            return {};
+        }
+    }
+
+    async saveGlobalDefaults(defaults: any): Promise<boolean> {
+        const url = this.getScriptUrl();
+        if (!url) return false;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: 'SAVE_GLOBAL_DEFAULTS', defaults })
+            });
+            const data = await response.json();
+            return data.status === 'success';
+        } catch (e) {
+            console.error(e);
             return false;
         }
     }
